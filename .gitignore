@@ -1,0 +1,6 @@
+# Secrets
+group_vars/all/jira.yml
+
+# Logs
+*.log
+/tmp/*

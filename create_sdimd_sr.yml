@@ -9,7 +9,7 @@
     urgency_id: "13518"           # Medium
     impact_id: "14612"            # Single user
     environment_id: "20707"       # Production
-    reporting_service_key: "SD-215"  # emaratechIT.IMD.Unix
+    reporting_service_key: "SD-215"  # Department
 
   tasks:
     - name: Create Service Request

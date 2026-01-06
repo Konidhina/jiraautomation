@@ -1,6 +1,6 @@
-# Jira Service Request Automation – SDIMD
+# Jira Service Request Automation – DataCenter edition
 
-This tool allows internal teams to raise **Jira Service Desk (SDIMD) Service Requests**
+This tool allows internal teams to raise **Jira Service Desk Service Requests**
 using a **single command**, without requiring Jira UI access or REST API knowledge.
 
 ---
@@ -39,8 +39,9 @@ Jira ticket number and portal URL are displayed after creation
 
 raise-sr "Problem / Service request statement"
 
-📁 Repository Structure
+## 📁 Repository Structure
 
+```text
 jira-sr/
 ├── create_sdimd_sr.yml        # Ansible playbook (Jira SR creation logic)
 ├── raise-sr                   # User-facing wrapper command

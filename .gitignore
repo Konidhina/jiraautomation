@@ -8,3 +8,7 @@ group_vars/all/jira.yml
 *.vault
 vault_pass*
 *.retry
+group_vars/all/jira.yml
+*.vault
+vault_pass*
+*.retry

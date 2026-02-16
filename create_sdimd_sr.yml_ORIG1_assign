@@ -1,0 +1,144 @@
+---
+- name: Create SDIMD Service Request and assign to requester
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars_files:
+    - group_vars/all/jira.yml
+
+  vars:
+    serviceDeskId: "7"
+    requestTypeId: "94"
+    portalId: "7"
+
+  tasks:
+    - name: Validate required variables
+      ansible.builtin.assert:
+        that:
+          - jira_url is defined
+          - jira_pat is defined
+          - jira_requester_username is defined
+          - jira_requester_username | length > 0
+
+          - summary is defined
+          - summary | length > 0
+
+          - sdimd_environment_id is defined
+          - sdimd_environment_id | length > 0
+          - sdimd_urgency_id is defined
+          - sdimd_urgency_id | length > 0
+          - sdimd_impact_id is defined
+          - sdimd_impact_id | length > 0
+
+          - sdimd_reporting_service_object_id is defined
+          - sdimd_reporting_service_object_id | length > 0
+        fail_msg: >
+          Missing required vars in group_vars/all/jira.yml (vault).
+          Ensure jira_url, jira_pat, jira_requester_username and sdimd_* ids exist.
+
+    - name: Default description to summary when not provided
+      ansible.builtin.set_fact:
+        sr_description: "{{ (description is defined and (description | length > 0)) | ternary(description, summary) }}"
+
+    - name: Lookup Insight objectKey for Reporting Service (from object id)
+      ansible.builtin.uri:
+        url: "{{ jira_url }}/rest/insight/1.0/object/{{ sdimd_reporting_service_object_id }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ jira_pat }}"
+          Accept: "application/json"
+        return_content: true
+        status_code: [200]
+        validate_certs: false
+      register: insight_obj
+
+    - name: Set reporting service objectKey
+      ansible.builtin.set_fact:
+        sdimd_reporting_service_object_key: "{{ insight_obj.json.objectKey | default('') }}"
+
+    - name: Create SR (try Reporting Service by id, fallback to key)
+      block:
+        - name: Create SR (Reporting Service using id)
+          ansible.builtin.uri:
+            url: "{{ jira_url }}/rest/servicedeskapi/request"
+            method: POST
+            headers:
+              Authorization: "Bearer {{ jira_pat }}"
+              Accept: "application/json"
+              Content-Type: "application/json"
+            body_format: json
+            body:
+              serviceDeskId: "{{ serviceDeskId }}"
+              requestTypeId: "{{ requestTypeId }}"
+              requestFieldValues:
+                summary: "{{ summary }}"
+                description: "{{ sr_description }}"
+                customfield_13657: { id: "{{ sdimd_environment_id }}" }
+                customfield_13210: { id: "{{ sdimd_urgency_id }}" }
+                customfield_13204: { id: "{{ sdimd_impact_id }}" }
+                customfield_14503:
+                  - { id: "{{ sdimd_reporting_service_object_id }}" }
+            return_content: true
+            status_code: [201]
+            validate_certs: false
+          register: create_resp
+
+      rescue:
+        - name: Ensure Insight objectKey resolved
+          ansible.builtin.assert:
+            that:
+              - sdimd_reporting_service_object_key | length > 0
+            fail_msg: "Could not resolve Insight objectKey for id={{ sdimd_reporting_service_object_id }}"
+
+        - name: Create SR (Reporting Service using key)
+          ansible.builtin.uri:
+            url: "{{ jira_url }}/rest/servicedeskapi/request"
+            method: POST
+            headers:
+              Authorization: "Bearer {{ jira_pat }}"
+              Accept: "application/json"
+              Content-Type: "application/json"
+            body_format: json
+            body:
+              serviceDeskId: "{{ serviceDeskId }}"
+              requestTypeId: "{{ requestTypeId }}"
+              requestFieldValues:
+                summary: "{{ summary }}"
+                description: "{{ sr_description }}"
+                customfield_13657: { id: "{{ sdimd_environment_id }}" }
+                customfield_13210: { id: "{{ sdimd_urgency_id }}" }
+                customfield_13204: { id: "{{ sdimd_impact_id }}" }
+                customfield_14503:
+                  - { key: "{{ sdimd_reporting_service_object_key }}" }
+            return_content: true
+            status_code: [201]
+            validate_certs: false
+          register: create_resp
+
+    - name: Capture created issue key
+      ansible.builtin.set_fact:
+        created_issue_key: "{{ create_resp.json.issueKey | default('') }}"
+
+    - name: Assign created ticket to requester
+      ansible.builtin.uri:
+        url: "{{ jira_url }}/rest/api/2/issue/{{ created_issue_key }}/assignee"
+        method: PUT
+        headers:
+          Authorization: "Bearer {{ jira_pat }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          name: "{{ jira_requester_username }}"
+        status_code: [204]
+        validate_certs: false
+      when: created_issue_key | length > 0
+
+    - name: Show results
+      ansible.builtin.debug:
+        msg:
+          - "✅ Created: {{ created_issue_key }}"
+          - "🔗 Agent: {{ jira_url }}/browse/{{ created_issue_key }}"
+          - "🔗 Portal: {{ jira_url }}/servicedesk/customer/portal/{{ portalId }}/{{ created_issue_key }}"
+          - "👤 Assigned to: {{ jira_requester_username }}"
+

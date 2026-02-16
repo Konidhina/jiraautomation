@@ -1,0 +1,230 @@
+---
+- name: Create SDIMD Service Request and optionally set assignee/team
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars_files:
+    - group_vars/all/jira.yml
+
+  vars:
+    # Defaults (can be overridden via raise-sr -e)
+    sdimd_service_desk_id: "{{ sdimd_service_desk_id | default('7') }}"
+    sdimd_request_type_id: "{{ sdimd_request_type_id | default('94') }}"
+
+    # Required option IDs from your requesttype fields:
+    # Environment: Production=20707, Non-Production=20708
+    sdimd_environment_id: "{{ sdimd_environment_id | default('20707') }}"
+    # Urgency: Critical=13516, High=13517, Medium=13518, Low=13519
+    sdimd_urgency_id: "{{ sdimd_urgency_id | default('13518') }}"
+    # Impact: Enterprise=14609, Site or department=14610, Multiple users=14611, Single user=14612
+    sdimd_impact_id: "{{ sdimd_impact_id | default('14612') }}"
+
+    # Workflow transition id for "Change Group" (from your curl output)
+    sdimd_change_group_transition_id: "{{ sdimd_change_group_transition_id | default('91') }}"
+
+  tasks:
+    - name: Validate required variables
+      assert:
+        that:
+          - jira_url is defined and jira_url | length > 0
+          - jira_pat is defined and jira_pat | length > 0
+          - summary is defined and summary | length > 0
+          - sdimd_reporting_service_object_id is defined and (sdimd_reporting_service_object_id | string | length > 0)
+        fail_msg: "Missing required vars. Need: jira_url, jira_pat, summary, sdimd_reporting_service_object_id"
+
+    - name: Default description to summary when not provided
+      set_fact:
+        description_effective: "{{ (description | default('') | trim) if (description | default('') | trim) else (summary | trim) }}"
+
+    - name: Decide effective assignee username (CLI override wins)
+      set_fact:
+        effective_assignee: >-
+          {{
+            (assign_to | default('') | trim)
+            if (assign_to | default('') | trim)
+            else (jira_requester_username | default('') | trim)
+          }}
+
+    - name: Fail if effective_assignee is empty
+      assert:
+        that:
+          - effective_assignee | length > 0
+        fail_msg: "effective_assignee is empty. Set jira_requester_username in vault or pass --assign-to"
+
+    # --- Reporting Service (Insight) resolution ---
+    - name: Lookup Insight object to get objectKey for Reporting Service (from object id)
+      ansible.builtin.uri:
+        url: "{{ jira_url }}/rest/insight/1.0/object/{{ sdimd_reporting_service_object_id }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ jira_pat }}"
+          Accept: "application/json"
+        return_content: true
+        status_code: [200]
+      register: rs_obj
+
+    - name: Set reporting service objectKey
+      set_fact:
+        reporting_service_object_key: "{{ rs_obj.json.objectKey | default('') | string }}"
+
+    - name: Ensure Reporting Service objectKey resolved
+      assert:
+        that:
+          - reporting_service_object_key | length > 0
+        fail_msg: "Could not resolve reporting_service_object_key from Insight object id={{ sdimd_reporting_service_object_id }}"
+
+    # --- Create request (try array-of-object first, fallback to object) ---
+    - name: Create SR (Reporting Service as array of object)
+      ansible.builtin.uri:
+        url: "{{ jira_url }}/rest/servicedeskapi/request"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ jira_pat }}"
+          Accept: "application/json"
+          Content-Type: "application/json"
+        body_format: json
+        return_content: true
+        status_code: [201, 400]
+        body:
+          serviceDeskId: "{{ sdimd_service_desk_id }}"
+          requestTypeId: "{{ sdimd_request_type_id }}"
+          requestFieldValues:
+            summary: "{{ summary | trim }}"
+            description: "{{ description_effective }}"
+            customfield_14503:
+              - key: "{{ reporting_service_object_key }}"
+            customfield_13210: "{{ sdimd_urgency_id }}"
+            customfield_13204: "{{ sdimd_impact_id }}"
+            customfield_13657: "{{ sdimd_environment_id }}"
+      register: create_try_array
+
+    - name: "Create SR (fallback: Reporting Service as object)"
+      when: create_try_array.status == 400
+      ansible.builtin.uri:
+        url: "{{ jira_url }}/rest/servicedeskapi/request"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ jira_pat }}"
+          Accept: "application/json"
+          Content-Type: "application/json"
+        body_format: json
+        return_content: true
+        status_code: [201]
+        body:
+          serviceDeskId: "{{ sdimd_service_desk_id }}"
+          requestTypeId: "{{ sdimd_request_type_id }}"
+          requestFieldValues:
+            summary: "{{ summary | trim }}"
+            description: "{{ description_effective }}"
+            customfield_14503:
+              key: "{{ reporting_service_object_key }}"
+            customfield_13210: "{{ sdimd_urgency_id }}"
+            customfield_13204: "{{ sdimd_impact_id }}"
+            customfield_13657: "{{ sdimd_environment_id }}"
+      register: create_fallback_object
+
+    - name: Select create response
+      set_fact:
+        create_resp: "{{ (create_fallback_object if (create_try_array.status == 400) else create_try_array) }}"
+
+    - name: Capture created issue key
+      set_fact:
+        created_issue_key: >-
+          {{
+            create_resp.json.issueKey
+            | default(create_resp.json.issueKey | default(''))
+          }}
+
+    - name: Fallback resolve issue key if missing (use issueId)
+      when: created_issue_key | length == 0 and (create_resp.json.issueId is defined)
+      ansible.builtin.uri:
+        url: "{{ jira_url }}/rest/api/2/issue/{{ create_resp.json.issueId }}?fields=key"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ jira_pat }}"
+          Accept: "application/json"
+        return_content: true
+        status_code: [200]
+      register: issue_lookup
+
+    - name: Set created issue key from lookup
+      when: created_issue_key | length == 0 and issue_lookup is defined
+      set_fact:
+        created_issue_key: "{{ issue_lookup.json.key | default('') }}"
+
+    - name: Fail if issue key missing
+      assert:
+        that:
+          - created_issue_key | length > 0
+        fail_msg: "Could not determine created_issue_key from ServiceDesk response."
+
+    # --- Assign to effective assignee ---
+    - name: Assign created ticket (effective assignee)
+      ansible.builtin.uri:
+        url: "{{ jira_url }}/rest/api/2/issue/{{ created_issue_key }}/assignee"
+        method: PUT
+        headers:
+          Authorization: "Bearer {{ jira_pat }}"
+          Content-Type: "application/json"
+          Accept: "application/json"
+        body_format: json
+        status_code: [204]
+        body:
+          name: "{{ effective_assignee }}"
+
+    # --- Optional: Change Group (team) via transition ---
+    - name: Decide team objectKey (if provided)
+      set_fact:
+        team_object_key_effective: >-
+          {{
+            (sdimd_team_object_key | default('') | trim)
+            if (sdimd_team_object_key | default('') | trim)
+            else (
+              (sdimd_team_value | default('') | regex_search('SD-[0-9]+')) | default('')
+            )
+          }}
+
+    - name: Set Assignment group via transition "Change Group" (try array)
+      when: team_object_key_effective | length > 0
+      ansible.builtin.uri:
+        url: "{{ jira_url }}/rest/api/2/issue/{{ created_issue_key }}/transitions"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ jira_pat }}"
+          Content-Type: "application/json"
+          Accept: "application/json"
+        body_format: json
+        return_content: true
+        status_code: [204, 400]
+        body:
+          transition:
+            id: "{{ sdimd_change_group_transition_id }}"
+          fields:
+            customfield_14607:
+              - key: "{{ team_object_key_effective }}"
+      register: change_group_try_array
+
+    - name: Set Assignment group via transition "Change Group" (fallback object)
+      when: team_object_key_effective | length > 0 and change_group_try_array.status == 400
+      ansible.builtin.uri:
+        url: "{{ jira_url }}/rest/api/2/issue/{{ created_issue_key }}/transitions"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ jira_pat }}"
+          Content-Type: "application/json"
+          Accept: "application/json"
+        body_format: json
+        return_content: true
+        status_code: [204]
+        body:
+          transition:
+            id: "{{ sdimd_change_group_transition_id }}"
+          fields:
+            customfield_14607:
+              key: "{{ team_object_key_effective }}"
+
+    - name: Show created issue key
+      debug:
+        msg: "Created issue: {{ created_issue_key }}"
+

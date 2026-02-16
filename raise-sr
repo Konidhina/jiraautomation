@@ -1,28 +1,70 @@
 #!/bin/bash
+set -euo pipefail
 
-if [ -z "$1" ]; then
-  echo "Usage: raise-sr \"Summary text\""
+usage() {
+  cat <<'EOF'
+Usage:
+  raise-sr "Summary text" [G|Solutions|Group|Noqodi]
+
+Examples:
+  raise-sr "install apigee components using ansible playbooks" G
+  raise-sr "test" Solutions
+  raise-sr "test" Group
+  raise-sr "test" Noqodi
+EOF
+}
+
+if [ -z "${1:-}" ]; then
+  usage
   exit 1
 fi
 
-OUTPUT=$(ansible-playbook -i localhost, /opt/jira-sr/create_sdimd_sr.yml \
-  --ask-vault-pass \
-  -e "{\"summary\":\"$1\"}" 2>&1)
+SUMMARY="$1"
+COMPANY_INPUT="${2:-G}"
 
-STATUS=$?
+# Normalize (case-insensitive)
+COMPANY="$(echo "$COMPANY_INPUT" | tr '[:upper:]' '[:lower:]')"
 
-if [ $STATUS -ne 0 ]; then
+# Map company labels -> Jira option IDs
+case "$COMPANY" in
+  g|emaratechg|emaratech)
+    COMPANY_ID="30516"
+    ;;
+  solutions|emaratechsolutions)
+    COMPANY_ID="42405"
+    ;;
+  group|emaratechgroup)
+    COMPANY_ID="42411"
+    ;;
+  noqodi)
+    COMPANY_ID="30519"
+    ;;
+  *)
+    echo "❌ Unknown company: $COMPANY_INPUT"
+    usage
+    exit 1
+    ;;
+esac
+
+# Escape any double-quotes in SUMMARY for JSON
+SUMMARY_JSON_ESCAPED="${SUMMARY//\"/\\\"}"
+
+OUTPUT=$(
+  ansible-playbook -i localhost, -c local /opt/jira-sr/create_sdimd_sr.yml \
+    --ask-vault-pass \
+    --extra-vars "{\"summary\":\"${SUMMARY_JSON_ESCAPED}\",\"company_id\":\"${COMPANY_ID}\"}" 2>&1
+) || {
   echo "❌ Failed to raise Service Request"
   echo "$OUTPUT"
   exit 1
-fi
+}
 
-ISSUE_KEY=$(echo "$OUTPUT" | grep -o 'ISSUE_KEY=[A-Z0-9-]\+' | cut -d= -f2)
-ISSUE_URL=$(echo "$OUTPUT" | grep -o 'ISSUE_URL=https[^ ]\+')
+ISSUE_KEY="$(echo "$OUTPUT" | grep -o 'ISSUE_KEY=[A-Z0-9-]\+' | cut -d= -f2 | tail -n 1)"
+ISSUE_URL="$(echo "$OUTPUT" | grep -o 'ISSUE_URL=https[^ ]\+' | cut -d= -f2 | tail -n 1)"
 
-if [ -n "$ISSUE_KEY" ]; then
+if [ -n "${ISSUE_KEY:-}" ]; then
   echo "✅ Service Request raised: $ISSUE_KEY"
-  [ -n "$ISSUE_URL" ] && echo "🔗 $ISSUE_URL"
+  [ -n "${ISSUE_URL:-}" ] && echo "🔗 $ISSUE_URL"
 else
   echo "✅ Service Request raised successfully"
 fi

@@ -1,11 +1,7 @@
----
-- name: Create SDIMD issue via Jira Core API (Company option id)
+- name: Create SDIMD issue via Jira Core API (workaround for Company validation)
   hosts: localhost
   connection: local
-  gather_facts: false
-
-  vars_files:
-    - group_vars/all/jira.yml
+  gather_facts: no
 
   vars:
     project_key: "SDIMD"
@@ -14,22 +10,10 @@
     urgency_id: "13518"            # Medium
     impact_id: "14612"             # Single user
     environment_id: "20707"        # Production
-
     reporting_service_key: "SD-215"
-
-    # Default company option id (can be overridden via group_vars/all/jira.yml or CLI -e company_id=...)
-    company_id_default: "{{ company_id | default('30516') }}"
+    company_name: "Emaratech"
 
   tasks:
-    - name: Decide effective company id
-      set_fact:
-        company_id_effective: >-
-          {{
-            (company_id | default('') | string | trim)
-            if (company_id | default('') | string | trim)
-            else (company_id_default | string | trim)
-          }}
-
     - name: Create Issue
       ansible.builtin.uri:
         url: "{{ jira_url }}/rest/api/2/issue"
@@ -45,16 +29,13 @@
               key: "{{ project_key }}"
             issuetype:
               id: "{{ issuetype_id }}"
-
-            # Summary + Description are same
             summary: "{{ summary }}"
             description: "{{ summary }}"
 
-            # Company (Option field) -> must be object with id/value
-            customfield_20000:
-              id: "{{ company_id_effective }}"
+            # Company (required by your validator)
+            customfield_20000: "{{ company | default(company_name) }}"
 
-            # Option fields
+            # Option fields (same ids you already use)
             customfield_13210:
               id: "{{ urgency_id }}"
             customfield_13204:

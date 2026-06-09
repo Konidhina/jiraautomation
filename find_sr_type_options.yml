@@ -1,0 +1,30 @@
+---
+- name: Find SR Type option IDs from existing issue
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars_files:
+    - /opt/jira-sr/group_vars/all/jira.yml
+
+  vars:
+    sample_issue: "SDIMD-63783"
+
+  tasks:
+    - name: Get edit metadata
+      ansible.builtin.uri:
+        url: "{{ jira_url }}/rest/api/2/issue/{{ sample_issue }}/editmeta"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ jira_pat }}"
+          Accept: "application/json"
+        validate_certs: true
+        return_content: true
+        status_code: 200
+      register: meta
+
+    - name: Show fields matching SR Type
+      ansible.builtin.debug:
+        msg: "{{ item.key }} => {{ item.value.name }}"
+      loop: "{{ meta.json.fields | dict2items }}"
+      when: item.value.name is search("SR Type", ignorecase=True)

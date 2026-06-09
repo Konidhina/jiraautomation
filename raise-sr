@@ -52,7 +52,7 @@ SUMMARY_JSON_ESCAPED="${SUMMARY//\"/\\\"}"
 OUTPUT=$(
   ansible-playbook -i localhost, -c local /opt/jira-sr/create_sdimd_sr.yml \
     --ask-vault-pass \
-    --extra-vars "{\"summary\":\"${SUMMARY_JSON_ESCAPED}\",\"company_id\":\"${COMPANY_ID}\"}" 2>&1
+    --extra-vars "{\"summary\":\"${SUMMARY_JSON_ESCAPED}\",\"subsidiary\":\"${COMPANY}\"}" 2>&1
 ) || {
   echo "❌ Failed to raise Service Request"
   echo "$OUTPUT"

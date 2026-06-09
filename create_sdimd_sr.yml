@@ -1,5 +1,5 @@
 ---
-- name: Create SDIMD issue via Jira Core API (Company option id)
+- name: Create SDIMD issue via Jira Core API
   hosts: localhost
   connection: local
   gather_facts: false
@@ -8,28 +8,35 @@
     - group_vars/all/jira.yml
 
   vars:
+    jira_url: "https://jira.emaratech.ae"
+
     project_key: "SDIMD"
-    issuetype_id: "11301"          # Service Request
+    issuetype_id: "11301"
 
-    urgency_id: "13518"            # Medium
-    impact_id: "14612"             # Single user
-    environment_id: "20707"        # Production
-
+    urgency_id: "13518"
+    impact_id: "14612"
+    environment_id: "{{ env_id | default('20707') }}"
     reporting_service_key: "SD-215"
+    # Default SR Type
+    # Environment Provisioning & Maintenance
+    sr_type_id: "43723"
 
-    # Default company option id (can be overridden via group_vars/all/jira.yml or CLI -e company_id=...)
-    company_id_default: "{{ company_id | default('30516') }}"
+    subsidiary_map:
+      group: "43502"
+      g: "43503"
+      emaratech: "43503"
+      solutions: "43504"
+      noqodi: "43505"
+      cybranytech: "43506"
+      eres: "43507"
+      egypt: "43508"
+      zajel: "43509"
+      others: "43481"
+
+    subsidiary_key: "{{ subsidiary | default('g') | lower }}"
+    subsidiary_id: "{{ subsidiary_map[subsidiary_key] | default('43503') }}"
 
   tasks:
-    - name: Decide effective company id
-      set_fact:
-        company_id_effective: >-
-          {{
-            (company_id | default('') | string | trim)
-            if (company_id | default('') | string | trim)
-            else (company_id_default | string | trim)
-          }}
-
     - name: Create Issue
       ansible.builtin.uri:
         url: "{{ jira_url }}/rest/api/2/issue"
@@ -46,27 +53,35 @@
             issuetype:
               id: "{{ issuetype_id }}"
 
-            # Summary + Description are same
             summary: "{{ summary }}"
             description: "{{ summary }}"
 
-            # Company (Option field) -> must be object with id/value
-            customfield_20000:
-              id: "{{ company_id_effective }}"
+            # Subsidiary
+            customfield_36200:
+              id: "{{ subsidiary_id }}"
 
-            # Option fields
+            # SR Type
+            customfield_32404:
+              id: "{{ sr_type_id }}"
+
+            # Urgency
             customfield_13210:
               id: "{{ urgency_id }}"
+
+            # Impact
             customfield_13204:
               id: "{{ impact_id }}"
+
+            # Environment
             customfield_13657:
               id: "{{ environment_id }}"
 
-            # Insight field (Assets)
+            # Reporting Service
             customfield_14503:
               - key: "{{ reporting_service_key }}"
 
-        status_code: [201]
+        status_code:
+          - 201
         validate_certs: true
         return_content: true
       register: created
@@ -76,4 +91,3 @@
         msg:
           - "ISSUE_KEY={{ created.json.key }}"
           - "ISSUE_URL={{ jira_url }}/browse/{{ created.json.key }}"
-

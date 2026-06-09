@@ -1,0 +1,29 @@
+---
+- name: Find Subsidiary option IDs from existing issue
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars_files:
+    - /opt/jira-sr/group_vars/all/jira.yml
+
+  vars:
+    sample_issue: "SDIMD-63783"
+
+  tasks:
+    - name: Get edit metadata
+      ansible.builtin.uri:
+        url: "{{ jira_url }}/rest/api/2/issue/{{ sample_issue }}/editmeta"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ jira_pat }}"
+          Accept: "application/json"
+        validate_certs: true
+        return_content: true
+        status_code: 200
+      register: meta
+
+    - name: Show Subsidiary allowed values
+      ansible.builtin.debug:
+        msg: "{{ item.id }} => {{ item.value }}"
+      loop: "{{ meta.json.fields.customfield_36200.allowedValues }}"

@@ -43,31 +43,5 @@ jira-sr/
     └── all/
         └── jira.yml                 # Vault file (Not pushed to Git)
 
-Create SR for emaratech G
-raise-sr "Deploy Linux VM using automation" G
-| Jira Field        | Value                                  |
-| ----------------- | -------------------------------------- |
-| Project           | SDIMD                                  |
-| Issue Type        | Service Request                        |
-| Environment       | Production                             |
-| Impact            | Single User                            |
-| Urgency           | Medium                                 |
-| Reporting Service | SD-215                                 |
-| SR Type           | Environment Provisioning & Maintenance |
-
-Supported Subsidiary Options
-
-| Command Value | Company             |
-| ------------- | ------------------- |
-| G             | emaratech G         |
-| emaratech     | emaratech           |
-| Solutions     | emaratech Solutions |
-| Group         | emaratech Group     |
-| Noqodi        | noqodi              |
-| cybranytech   | Cybranytech         |
-| eres          | ERES                |
-| egypt         | Egypt               |
-| zajel         | Zajel               |
-| others        | Others              |
 
 
